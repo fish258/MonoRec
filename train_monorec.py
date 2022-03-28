@@ -27,7 +27,7 @@ def main(config, options=()):
     logger.info(f"{sum(p.numel() for p in model.parameters() if p.requires_grad)} trainable parameters")
 
     # get function handles of loss and metrics
-    if "loss_module" in config.config:
+    if "loss_module" in config.config:   
         loss = config.initialize("loss_module", module_loss)
     else:
         loss = getattr(module_loss, config['loss'])

@@ -145,13 +145,13 @@ class CostVolumeModule(nn.Module):
         self.alpha = alpha
         self.not_center_cv = not_center_cv
         self.sfcv_mult_mask = sfcv_mult_mask
-        self.ssim = SSIM()
+        self.ssim = SSIM()  # 两张图越相似，SSIM越接近1，所以loss func中常用 1-ssim 定义损失函数
 
     def forward(self, data_dict):
         start_time = time.time()
-        keyframe = data_dict["keyframe"]
-        keyframe_intrinsics = data_dict["keyframe_intrinsics"]
-        keyframe_pose = data_dict["keyframe_pose"]
+        keyframe = data_dict["keyframe"]     # 获取ref view
+        keyframe_intrinsics = data_dict["keyframe_intrinsics"]   # 获取ref view的K
+        keyframe_pose = data_dict["keyframe_pose"]               # 
 
         frames = []
         intrinsics = []
@@ -166,7 +166,7 @@ class CostVolumeModule(nn.Module):
             intrinsics += [data_dict["stereoframe_intrinsics"]]
             poses += [data_dict["stereoframe_pose"]]
 
-        batch_size, channels, height, width = keyframe.shape
+        batch_size, channels, height, width = keyframe.shape  # [B, C, H, W]
 
         extrinsics = [torch.inverse(pose) for pose in poses]
 
@@ -190,18 +190,18 @@ class CostVolumeModule(nn.Module):
         cost_volumes = []
         single_frame_cvs = [[] for i in range(len(frames))]
 
-        for batch_nr in range(batch_size):
+        for batch_nr in range(batch_size):   # for i in range(B)，一组consecutive images做
             batch_depths = depths[batch_nr, :, :, :]
 
-            depth_value_count = batch_depths.shape[0]
+            depth_value_count = batch_depths.shape[0]  # M个depth plane
 
-            inv_k = torch.inverse(keyframe_intrinsics[batch_nr]).unsqueeze(0)
+            inv_k = torch.inverse(keyframe_intrinsics[batch_nr]).unsqueeze(0)  # K^-1
             cam_points = (inv_k[:, :3, :3] @ backproject_depth.coord)
             cam_points = batch_depths.view(depth_value_count, 1, -1) * cam_points
             cam_points = torch.cat([cam_points, backproject_depth.ones.expand(depth_value_count, -1, -1)], 1)
 
-            warped_images = []
-            warped_masks = []
+            warped_images = []  # src images warp到 ref images的投影图像
+            warped_masks = []   # 记录valid区域
 
             for i, image in enumerate(frames):
                 t = extrinsics[i][batch_nr] @ keyframe_pose[batch_nr]
@@ -219,7 +219,7 @@ class CostVolumeModule(nn.Module):
                 warped_mask = mask_to_warp[0] * torch.min(warped_mask != 0, dim=0)[0]
                 warped_masks.append(warped_mask)
 
-            # (D, F, C, H, W)
+            # (D, F, C, H, W) - D: fronto planes数; F: src图片数量?; C,H,W: image shape
             warped_images = torch.stack(warped_images, dim=1)
             # (F, 1, H, W)
             warped_masks = torch.stack(warped_masks)
@@ -251,15 +251,15 @@ class CostVolumeModule(nn.Module):
                 single_frame_cv = (1 - sad_volume * 2) * warped_masks
             else:
                 single_frame_cv = (1 - sad_volume * 2) * (torch.any(warped_images != 0, dim=2) | torch.all(warped_images == keyframe[batch_nr], dim=2)).permute(1, 0, 2, 3)
-            for i in range(len(frames)):
+            for i in range(len(frames)): # for every frame F
                 single_frame_cvs[i] += [single_frame_cv[i]]
 
             sum_item = torch.exp(-self.alpha * torch.pow(sad_volume - torch.min(sad_volume, dim=1, keepdim=True)[0], 2))
-            weight = 1 - 1 / (depth_value_count - 1) * (torch.sum(sum_item, dim=1, keepdim=True) - 1)
+            weight = 1 - 1 / (depth_value_count - 1) * (torch.sum(sum_item, dim=1, keepdim=True) - 1)  # depth_value_count就是M
 
-            weight *= warped_masks
+            weight *= warped_masks  # (F, 1, H, W)
 
-            cost_volume = torch.sum(sad_volume * weight, dim=0)
+            cost_volume = torch.sum(sad_volume * weight, dim=0)   # 
 
             weight_sum = torch.sum(weight, dim=0).squeeze()
             weight_zero = weight_sum == 0
