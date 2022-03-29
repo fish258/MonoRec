@@ -20,23 +20,23 @@ class KittiOdometryDataset(Dataset):
                  use_color_augmentation=False, lidar_depth=False, dso_depth=True, annotated_lidar=True, return_stereo=False, return_mvobj_mask=False, use_index_mask=()):
         """
         Dataset implementation for KITTI Odometry.
-        :param dataset_dir: Top level folder for KITTI Odometry (should contain folders sequences, poses, poses_dvso (if available)
-        :param frame_count: Number of frames used per sample (excluding the keyframe). By default, the keyframe is in the middle of those frames. (Default=2)
-        :param sequences: Which sequences to use. Should be tuple of strings, e.g. ("00", "01", ...)
-        :param depth_folder: The folder within the sequence folder that contains the depth information (e.g. sequences/00/{depth_folder})
-        :param target_image_size: Desired image size (correct processing of depths is only guaranteed for default value). (Default=(256, 512))
-        :param max_length: Maximum length per sequence. Useful for splitting up sequences and testing. (Default=None)
-        :param dilation: Spacing between the frames (Default 1)
-        :param offset_d: Index offset for frames (offset_d=0 means keyframe is centered). (Default=0)
-        :param use_color: Use color (camera 2) or greyscale (camera 0) images (default=True)
-        :param use_dso_poses: Use poses provided by d(v)so instead of KITTI poses. Requires poses_dvso folder. (Default=True)
-        :param use_color_augmentation: Use color jitter augmentation. The same transformation is applied to all frames in a sample. (Default=False)
-        :param lidar_depth: Use depth information from (annotated) velodyne data. (Default=False)
-        :param dso_depth: Use depth information from d(v)so. (Default=True)
-        :param annotated_lidar: If lidar_depth=True, then this determines whether to use annotated or non-annotated depth maps. (Default=True)
-        :param return_stereo: Return additional stereo frame. Only used during training. (Default=False)
-        :param return_mvobj_mask: Return additional moving object mask. Only used during training. If return_mvobj_mask=2, then the mask is returned as target instead of the depthmap. (Default=False)
-        :param use_index_mask: Use the listed index masks (if a sample is listed in one of the masks, it is not used). (Default=())
+        - dataset_dir: Top level folder for KITTI Odometry (should contain folders sequences, poses, poses_dvso (if available)
+        - frame_count: Number of frames used per sample (excluding the keyframe). By default, the keyframe is in the middle of those frames. (Default=2)
+        - sequences: Which sequences to use. Should be tuple of strings, e.g. ("00", "01", ...)
+        - depth_folder: The folder within the sequence folder that contains the depth information (e.g. sequences/00/{depth_folder})
+        - target_image_size: Desired image size (correct processing of depths is only guaranteed for default value). (Default=(256, 512))
+        - max_length: Maximum length per sequence. Useful for splitting up sequences and testing. (Default=None)
+        - dilation: Spacing between the frames (Default 1)
+        - offset_d: Index offset for frames (offset_d=0 means keyframe is centered). (Default=0)
+        - use_color: Use color (camera 2) or greyscale (camera 0) images (default=True)
+        - use_dso_poses: Use poses provided by d(v)so instead of KITTI poses. Requires poses_dvso folder. (Default=True)
+        - use_color_augmentation: Use color jitter augmentation. The same transformation is applied to all frames in a sample. (Default=False)
+        - lidar_depth: Use depth information from (annotated) velodyne data. (Default=False)
+        - dso_depth: Use depth information from d(v)so. (Default=True)
+        - annotated_lidar: If lidar_depth=True, then this determines whether to use annotated or non-annotated depth maps. (Default=True)
+        - return_stereo: Return additional stereo frame. Only used during training. (Default=False)
+        - return_mvobj_mask: Return additional moving object mask. Only used during training. If return_mvobj_mask=2, then the mask is returned as target instead of the depthmap. (Default=False)
+        - use_index_mask: Use the listed index masks (if a sample is listed in one of the masks, it is not used). (Default=())
         """
         self.dataset_dir = Path(dataset_dir)
         self.frame_count = frame_count
@@ -227,14 +227,15 @@ class KittiOdometryDataset(Dataset):
         dataset = self._datasets[dataset_index]
         keyframe_intrinsics = self._intrinsics[dataset_index]
         if not (self.lidar_depth or self.dso_depth):
+            # 如果没有使用lidar或者dso的depth，就直接使用现成的npy
             keyframe_depth = self.preprocess_depth(np.load(depth_folder / f"{(index + self._offset):06d}.npy"), self._depth_crop_boxes[dataset_index]).type(torch.float32).unsqueeze(0)
         else:
             if self.lidar_depth:
-                if not self.annotated_lidar:
+                if not self.annotated_lidar: # 如果不使用annotated_lidar数据，就
                     lidar_depth = 1 / torch.tensor(sparse.load_npz(depth_folder / f"{(index + self._offset):06d}.npz").todense()).type(torch.float32).unsqueeze(0)
                     lidar_depth[torch.isinf(lidar_depth)] = 0
                     keyframe_depth = lidar_depth
-                else:
+                else: # 使用lidar数据
                     keyframe_depth = self.preprocess_depth_annotated_lidar(Image.open(depth_folder / f"{(index + self._offset):06d}.png"), self._crop_boxes[dataset_index]).unsqueeze(0)
             else:
                 keyframe_depth = torch.zeros(1, self.target_image_size[0], self.target_image_size[1], dtype=torch.float32)
