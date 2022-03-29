@@ -11,7 +11,7 @@ from data_loader.kitti_odometry_dataset import KittiOdometryDataset
 from model.monorec.monorec_model import MonoRecModel
 from utils import unsqueezer, map_fn, to
 
-target_image_size = (256, 512)
+target_image_size = (256, 512) # 测试图片大小; 原始大小为(370,1226)
 
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
