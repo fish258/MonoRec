@@ -12,11 +12,15 @@ import torch.nn.functional as F
 
 
 def map_fn(batch, fn):
+    # 把dict或者list或者tensor本身，使用fn function操作，进行返回。
+    # 最终return的类型和开始保持一致
     if isinstance(batch, dict):
+        # 传入的是batch
         for k in batch.keys():
             batch[k] = map_fn(batch[k], fn)
         return batch
     elif isinstance(batch, list):
+        # 传入的是list
         return [map_fn(e, fn) for e in batch]
     else:
         return fn(batch)

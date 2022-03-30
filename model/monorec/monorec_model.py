@@ -726,4 +726,28 @@ class MonoRecModel(nn.Module):
             data_dict["result"] = data_dict["predicted_inverse_depths"][0]
             data_dict["mask"] = data_dict["cv_mask"]
 
+        '''
+        data - {
+            keyframe - tensor (3,256,512) - 3张图
+            keyframe_pose - tensor (4,4) - [R|t] - [R3 t3; 0 0 0 1] kf的内参
+            keyframe_intrinsics - tensor - K - kf camera intrinsics (4,4) kf的外参
+            frames - list - 是src frame的图片(3,256,512)
+            poses - list - 是src frame的相机pose [R|t] (4,4)
+            intrinsics - list - 是src frame的内参矩阵 K (4,4)
+            sequence - tensor - 属于哪个sequence e.g. seq07 - 7
+            image_id - tensor - 这个seq里的哪张图片 - 169
+            ##############上边的是model输入的input dict###########
+            inv_depth_min - 提前设定好的 - 0.33
+            inv_depth_max - 提前设定好的 - 0.0025
+            cv_depth_steps - 提前设定好的M - 32
+            cost_volume - tensor [B=1,32,256,512]
+            single_frame_cvs - list - len=src图的个数(不包含kf) 3 - 每个都是[B=1,32,256,512]
+            cv_module_time - 0.0763 就是个时间record
+            image_features - list - 5个tensor [1,64,128,256]
+            cv_mask - [B=1,C=1,256,512]
+            predicted_inverse_depths - list - 4个[1,1,256,512]
+            result - tensor [1,1,256,512] - 最终的depth map image
+            mask - tensor [1,1,256,512] - 最终的mask image
+        }
+        '''
         return data_dict

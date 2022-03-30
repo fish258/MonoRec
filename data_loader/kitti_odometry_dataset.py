@@ -37,29 +37,34 @@ class KittiOdometryDataset(Dataset):
         - return_stereo: Return additional stereo frame. Only used during training. (Default=False)
         - return_mvobj_mask: Return additional moving object mask. Only used during training. If return_mvobj_mask=2, then the mask is returned as target instead of the depthmap. (Default=False)
         - use_index_mask: Use the listed index masks (if a sample is listed in one of the masks, it is not used). (Default=())
+                            我也不知道这个是干啥的，读不懂，但是好像问题不大。好像是使用mask中没有的samples。为了sample中有moving objects?
         """
-        self.dataset_dir = Path(dataset_dir)
-        self.frame_count = frame_count
-        self.sequences = sequences
-        self.depth_folder = depth_folder
-        self.lidar_depth = lidar_depth
-        self.annotated_lidar = annotated_lidar
-        self.dso_depth = dso_depth
-        self.target_image_size = target_image_size
-        self.use_index_mask = use_index_mask
-        self.offset_d = offset_d
-        if self.sequences is None:
-            self.sequences = [f"{i:02d}" for i in range(11)]
-        self._datasets = [pykitti.odometry(dataset_dir, sequence) for sequence in self.sequences]
-        self._offset = (frame_count // 2) * dilation
-        extra_frames = frame_count * dilation
-        if self.annotated_lidar and self.lidar_depth:
+        # 1. 准备工作
+        self.dataset_dir = Path(dataset_dir)   # 下边有poses, sequences, poses_dvso等文件夹
+        self.frame_count = frame_count         # 周围的src view image个数
+        self.sequences = sequences             # 文件名list: ["07"]
+        self.depth_folder = depth_folder       # 标注的lidar depth map数据
+        self.lidar_depth = lidar_depth         # 使用lidar_depth数据
+        self.annotated_lidar = annotated_lidar  # 使用annotated_lidar_depth数据。即从lidar_depth处理过的png文件
+        self.dso_depth = dso_depth             # 使用DVSO生成的depth map
+        self.target_image_size = target_image_size   # 最后要给出的image size
+        self.use_index_mask = use_index_mask         # 是否滤掉没有moving object的samples
+        self.offset_d = offset_d                     # index的offset
+        ## 如果没有设置sequence，则使用00～10
+        if self.sequences is None:    
+            self.sequences = [f"{i:02d}" for i in range(11)] # list - [00~10]
+        self._datasets = [pykitti.odometry(dataset_dir, sequence) for sequence in self.sequences]  # 查看一下这是啥
+        self._offset = (frame_count // 2) * dilation    # index的前后range,例如 使用 kf-offset ~ kf+offset index的数据
+        extra_frames = frame_count * dilation     # 2*1 = 2.  camfiles前后不能用作kf的frames有几张，排除出去。（计算dataset_size时使用）
+        if self.annotated_lidar and self.lidar_depth:  # 最多使用10张src view的图
             extra_frames = max(extra_frames, 10)
             self._offset = max(self._offset, 5)
+        ## 获取dataset_sizes. 即dataset中有多少张图片，len(cam2_files)
         self._dataset_sizes = [
             len((dataset.cam0_files if not use_color else dataset.cam2_files)) - (extra_frames if self.use_index_mask is None else 0) for dataset in
             self._datasets]
-        if self.use_index_mask is not None:
+        ## 如果使用index_mask，重新确定dataset_size
+        if self.use_index_mask is not None: 
             index_masks = []
             for sequence_length, sequence in zip(self._dataset_sizes, self.sequences):
                 index_mask = {i:True for i in range(sequence_length)}
@@ -75,10 +80,14 @@ class KittiOdometryDataset(Dataset):
                 for index_mask, dataset_size in zip(index_masks, self._dataset_sizes)
             ]
             self._dataset_sizes = [len(indices) for indices in self._indices]
-        if max_length is not None:
-            self._dataset_sizes = [min(s, max_length) for s in self._dataset_sizes]
+        ## dataset中最多1000张图
+        if max_length is not None:  
+            self._dataset_sizes = [min(s, max_length) for s in self._dataset_sizes] # 每个sequence文件中有多少个data
+        
+        ## 获取总length
         self.length = sum(self._dataset_sizes)
 
+        # 2. 获取相机矩阵K
         intrinsics_box = [self.compute_target_intrinsics(dataset, target_image_size, use_color) for dataset in
                           self._datasets]
         self._crop_boxes = [b for _, b in intrinsics_box]
@@ -98,6 +107,7 @@ class KittiOdometryDataset(Dataset):
                 dataset.pose_path = self.dataset_dir / "poses_dvso"
                 dataset._load_poses()
         if self.use_color_augmentation:
+            # 使用color增强
             self.color_transform = ColorJitterMulti(brightness=.2, contrast=.2, saturation=.2, hue=.1)
         self.return_stereo = return_stereo
         if self.return_stereo:
@@ -111,14 +121,15 @@ class KittiOdometryDataset(Dataset):
 
     def get_dataset_index(self, index: int):
         for dataset_index, dataset_size in enumerate(self._dataset_sizes):
-            if index >= dataset_size:
+            if index >= dataset_size:  # index out of range
                 index = index - dataset_size
-            else:
-                return dataset_index, index
+            else:   # index在范围内
+                return dataset_index, index # 返回dataset中这个数据的index e.g. 1200.jpg的1200, 3200
         return None, None
 
     def preprocess_image(self, img: Image.Image, crop_box=None):
         if crop_box:
+            # 裁剪
             img = img.crop(crop_box)
         if self.target_image_size:
             img = img.resize((self.target_image_size[1], self.target_image_size[0]), resample=Image.BILINEAR)
@@ -211,7 +222,7 @@ class KittiOdometryDataset(Dataset):
         return torch.tensor(depth, dtype=torch.float32)
 
     def __getitem__(self, index: int):
-        dataset_index, index = self.get_dataset_index(index)
+        dataset_index, index = self.get_dataset_index(index)  # 得到dataset中的index，输入的index
         if dataset_index is None:
             raise IndexError()
 
@@ -226,26 +237,38 @@ class KittiOdometryDataset(Dataset):
 
         dataset = self._datasets[dataset_index]
         keyframe_intrinsics = self._intrinsics[dataset_index]
+
+        # 获取GT for different training
         if not (self.lidar_depth or self.dso_depth):
-            # 如果没有使用lidar或者dso的depth，就直接使用现成的npy
+            # 如果既没有使用lidar，也没有使用dso的depth，就直接使用现成的npy (在image_depth_annotated).
+            # 这其实就是在把return的GT换成mask
+            # 但其实这没有运行过，author把mask的返回在最后边加了一段代码执行。
+            # 所以这个if 删了也没啥影响
             keyframe_depth = self.preprocess_depth(np.load(depth_folder / f"{(index + self._offset):06d}.npy"), self._depth_crop_boxes[dataset_index]).type(torch.float32).unsqueeze(0)
         else:
+            # 一般lidar_depth和dso_depth只会设置一个True
             if self.lidar_depth:
+                # 使用lidar depth
                 if not self.annotated_lidar: # 如果不使用annotated_lidar数据，就
+                    # 
                     lidar_depth = 1 / torch.tensor(sparse.load_npz(depth_folder / f"{(index + self._offset):06d}.npz").todense()).type(torch.float32).unsqueeze(0)
                     lidar_depth[torch.isinf(lidar_depth)] = 0
                     keyframe_depth = lidar_depth
-                else: # 使用lidar数据
+                else: # 使用lidar数据，并且annotated过了
+                    # lidar_depth=True; annotated=True
                     keyframe_depth = self.preprocess_depth_annotated_lidar(Image.open(depth_folder / f"{(index + self._offset):06d}.png"), self._crop_boxes[dataset_index]).unsqueeze(0)
             else:
+                # 没有使用lidar depth. 设置为全0 depth矩阵
                 keyframe_depth = torch.zeros(1, self.target_image_size[0], self.target_image_size[1], dtype=torch.float32)
 
             if self.dso_depth:
+                # dso_depth=True；使用了DSVO系统生成的image_sparse_depth
                 dso_depth = self.preprocess_depth_dso(Image.open(depth_folder / f"{(index + self._offset):06d}.png"), self.dso_depth_parameters[dataset_index], self._crop_boxes[dataset_index]).unsqueeze(0)
                 mask = dso_depth == 0
                 dso_depth[mask] = keyframe_depth[mask]
                 keyframe_depth = dso_depth
 
+        # 使用
         keyframe = self.preprocess_image(
             (dataset.get_cam0 if not self.use_color else dataset.get_cam2)(index + self._offset),
             self._crop_boxes[dataset_index])
@@ -278,12 +301,27 @@ class KittiOdometryDataset(Dataset):
             data["stereoframe_pose"] = stereoframe_pose
             data["stereoframe_intrinsics"] = keyframe_intrinsics
 
+        ############################# 在这返回data和mvobj_mask，应当是为了train mask module设置的 ####################################
         if self.return_mvobj_mask > 0:
+            # 在这返回data和mvobj_mask，应当是为了train mask module设置的
             mask = torch.tensor(np.load(sequence_folder / "mvobj_mask" / f"{index + self._offset:06d}.npy"), dtype=torch.float32).unsqueeze(0)
             data["mvobj_mask"] = mask
             if self.return_mvobj_mask == 2:
                 return data, mask
-
+        #################################################################
+        '''
+        data - {
+            keyframe - tensor (3,256,512) - RGB
+            keyframe_pose - tensor (4,4) - [R|t] - [R3 t3; 0 0 0 1] kf的内参
+            keyframe_intrinsics - tensor (4,4) - K - kf camera intrinsics kf的外参
+            frames - list - 是src frame的图片(3,256,512) 多张RGB
+            poses - list - 是src frame的相机pose [R|t] (4,4)
+            intrinsics - list - 是src frame的内参矩阵 K (4,4)
+            sequence - tensor - 属于哪个sequence e.g. seq07 - 7
+            image_id - tensor - 这个seq里的哪张图片 - 169
+        }
+        keyframe_depth - tensor (1,256,512)
+        '''
         return data, keyframe_depth
 
     def __len__(self) -> int:
