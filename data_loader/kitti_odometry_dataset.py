@@ -53,9 +53,13 @@ class KittiOdometryDataset(Dataset):
         ## 如果没有设置sequence，则使用00～10
         if self.sequences is None:    
             self.sequences = [f"{i:02d}" for i in range(11)] # list - [00~10]
-        self._datasets = [pykitti.odometry(dataset_dir, sequence) for sequence in self.sequences]  # 查看一下这是啥
+        self._datasets = [pykitti.odometry(dataset_dir, sequence) for sequence in self.sequences]
+        '''
+        list of <class 'pykitti.odometry.odometry'>
+        每个元素都是 dataset_dir/sequence/00～10 里造出来的class, 可以取各种信息。一个seq一个class
+        '''
         self._offset = (frame_count // 2) * dilation    # index的前后range,例如 使用 kf-offset ~ kf+offset index的数据
-        extra_frames = frame_count * dilation     # 2*1 = 2.  camfiles前后不能用作kf的frames有几张，排除出去。（计算dataset_size时使用）
+        extra_frames = frame_count * dilation     # 不是逐帧计算的，所以有额外的frame张数
         if self.annotated_lidar and self.lidar_depth:  # 最多使用10张src view的图
             extra_frames = max(extra_frames, 10)
             self._offset = max(self._offset, 5)
@@ -88,63 +92,79 @@ class KittiOdometryDataset(Dataset):
         self.length = sum(self._dataset_sizes)
 
         # 2. 获取相机矩阵K
-        intrinsics_box = [self.compute_target_intrinsics(dataset, target_image_size, use_color) for dataset in
-                          self._datasets]
-        self._crop_boxes = [b for _, b in intrinsics_box]
-        if self.dso_depth:
+        intrinsics_box = [self.compute_target_intrinsics(dataset, target_image_size, use_color) 
+                        for dataset in self._datasets]  # 每个dataset都有一个新K。原因是每录一段都是重新矫正的，所以相同设备也不一样
+        self._crop_boxes = [b for _, b in intrinsics_box] # 每段seq都一样。取原图的中心位置。代表的是4个点的坐标 (w左,h上,w右,h下)
+        # 3. 获取depth参数
+        if self.dso_depth: # 每段sequence的H, W, 原始K的fx
             self.dso_depth_parameters = [self.get_dso_depth_parameters(dataset) for dataset in self._datasets]
         elif not self.lidar_depth:
-            self._depth_crop_boxes = [
+            self._depth_crop_boxes = [  # depth也是裁剪成对应的区域
                 self.compute_depth_crop(self.dataset_dir / "sequences" / s / depth_folder) for s in
                 self.sequences]
-        self._intrinsics = [format_intrinsics(i, self.target_image_size) for i, _ in intrinsics_box]
-        self.dilation = dilation
+        # 4. 构建4*4的K
+        self._intrinsics = [format_intrinsics(i, self.target_image_size) for i, _ in intrinsics_box] # i - (f_x, f_y, c_x, c_y)
+        # 缓冲，咱也不知道是啥
+        self.dilation = dilation 
         self.use_color = use_color
-        self.use_dso_poses = use_dso_poses
-        self.use_color_augmentation = use_color_augmentation
+        self.use_dso_poses = use_dso_poses  # 是否使用dso_poses
+        self.use_color_augmentation = use_color_augmentation   # 是否使用color aug
         if self.use_dso_poses:
             for dataset in self._datasets:
                 dataset.pose_path = self.dataset_dir / "poses_dvso"
                 dataset._load_poses()
         if self.use_color_augmentation:
-            # 使用color增强
+            # 使用color aug
             self.color_transform = ColorJitterMulti(brightness=.2, contrast=.2, saturation=.2, hue=.1)
-        self.return_stereo = return_stereo
+        self.return_stereo = return_stereo   # 是否返回
         if self.return_stereo:
             self._stereo_transform = []
             for d in self._datasets:
-                st = torch.eye(4, dtype=torch.float32)
-                st[0, 3] = d.calib.b_rgb if self.use_color else d.calib.b_gray
+                st = torch.eye(4, dtype=torch.float32)  # 4*4 I
+                st[0, 3] = d.calib.b_rgb if self.use_color else d.calib.b_gray   # blue赋值给第一行
                 self._stereo_transform.append(st)
 
-        self.return_mvobj_mask = return_mvobj_mask
+        self.return_mvobj_mask = return_mvobj_mask   # 是否返回动态物体的mask
 
     def get_dataset_index(self, index: int):
+        # 返回sequence index，和在这个seq中的index
         for dataset_index, dataset_size in enumerate(self._dataset_sizes):
             if index >= dataset_size:  # index out of range
                 index = index - dataset_size
             else:   # index在范围内
-                return dataset_index, index # 返回dataset中这个数据的index e.g. 1200.jpg的1200, 3200
+                return dataset_index, index # 返回sequence index，和在这个seq中的index
         return None, None
 
     def preprocess_image(self, img: Image.Image, crop_box=None):
+        '''
+        返回target size的image
+        '''
         if crop_box:
-            # 裁剪
+            # 1.裁剪
             img = img.crop(crop_box)
         if self.target_image_size:
+            # 2.scale
             img = img.resize((self.target_image_size[1], self.target_image_size[0]), resample=Image.BILINEAR)
         if self.use_color_augmentation:
+            # 3.增强
             img = self.color_transform(img)
+        # 4. 化成tensor
         image_tensor = torch.tensor(np.array(img).astype(np.float32))
+        # 5. 范围scale
         image_tensor = image_tensor / 255 - .5
         if not self.use_color:
-            image_tensor = torch.stack((image_tensor, image_tensor, image_tensor))
+            # gray 图
+            image_tensor = torch.stack((image_tensor, image_tensor, image_tensor))   # (H,W)
         else:
-            image_tensor = image_tensor.permute(2, 0, 1)
+            # RGB图
+            image_tensor = image_tensor.permute(2, 0, 1)      # (3,H,W)
         del img
         return image_tensor
 
     def preprocess_depth(self, depth: np.ndarray, crop_box=None):
+        '''
+        返回target size的depth
+        '''
         if crop_box:
             if crop_box[1] >= 0 and crop_box[3] <= depth.shape[0]:
                 depth = depth[int(crop_box[1]):int(crop_box[3]), :]
@@ -163,6 +183,9 @@ class KittiOdometryDataset(Dataset):
         return torch.tensor(1 / depth)
 
     def preprocess_depth_dso(self, depth: Image.Image, dso_depth_parameters, crop_box=None):
+        '''
+        返回target size的depth
+        '''
         h, w, f_x = dso_depth_parameters
         depth = np.array(depth, dtype=np.float)
         indices = np.array(np.nonzero(depth), dtype=np.float)
@@ -193,11 +216,19 @@ class KittiOdometryDataset(Dataset):
         return torch.tensor(depth, dtype=torch.float32)
 
     def preprocess_depth_annotated_lidar(self, depth: Image.Image, crop_box=None):
+        '''
+        给depth map处理成对应的size
+        Input:
+            depth: Image (from png) - (H,W)
+            crop_box: 裁剪的image的坐标
+        Output:
+            depth - target size 的depth map
+        '''
         depth = np.array(depth, dtype=np.float)
         h, w = depth.shape
-        indices = np.array(np.nonzero(depth), dtype=np.float)
+        indices = np.array(np.nonzero(depth), dtype=np.float)   # (2,num) - 2是(x,y), num是depth ≠ 0的pixel个数。
 
-        depth = depth[depth > 0]
+        depth = depth[depth > 0]   # 选取depth>0的depth value
         depth = 256.0 / depth
 
         data = np.concatenate([indices, np.expand_dims(depth, axis=0)], axis=0)
@@ -216,29 +247,37 @@ class KittiOdometryDataset(Dataset):
         data[0] = np.clip(data[0] / crop_height * self.target_image_size[0], 0, self.target_image_size[0] - 1)
         data[1] = np.clip(data[1] / crop_width * self.target_image_size[1], 0, self.target_image_size[1] - 1)
 
+        # 生成最后的depth map
         depth = np.zeros(self.target_image_size)
-        depth[np.around(data[0]).astype(np.int), np.around(data[1]).astype(np.int)] = data[2]
+        depth[np.around(data[0]).astype(np.int), np.around(data[1]).astype(np.int)] = data[2]  # 获取x,y的depth赋值到depth(x,y)
 
         return torch.tensor(depth, dtype=torch.float32)
 
     def __getitem__(self, index: int):
-        dataset_index, index = self.get_dataset_index(index)  # 得到dataset中的index，输入的index
+        # 1. 获取image的index
+        dataset_index, index = self.get_dataset_index(index)  # 返回sequence index，和在这个seq中的index
         if dataset_index is None:
             raise IndexError()
-
-        if self.use_index_mask is not None:
+        
+        ## 判断是否使用index mask - 只考虑包含mvobj的samples
+        if self.use_index_mask is not None:  # 如果使用了index mask
             index = self._indices[dataset_index][index] - self._offset
-
-        sequence_folder = self.dataset_dir / "sequences" / self.sequences[dataset_index]
-        depth_folder = sequence_folder / self.depth_folder
-
+        
+        ## 获取seq的folder和下属的GT depth folder
+        sequence_folder = self.dataset_dir / "sequences" / self.sequences[dataset_index]  # 获取seq文件夹
+        depth_folder = sequence_folder / self.depth_folder          # 获取保存GT的文件夹 - {kitti}/seq/image_depth_annonated
+        
+        ## 判断是否color aug
         if self.use_color_augmentation:
+            # 使用color aug
             self.color_transform.fix_transform()
 
-        dataset = self._datasets[dataset_index]
-        keyframe_intrinsics = self._intrinsics[dataset_index]
+        # 2. 这个获取了KITTI的dataset （有很多信息），这个image所在的seq
+        dataset = self._datasets[dataset_index]                # '''获取dataset <class 'pykitti.odometry.odometry'>'''
+        # 3. 获取相机内参K (preprocess过了)
+        keyframe_intrinsics = self._intrinsics[dataset_index]  # 获取seqid的相机内参K
 
-        # 获取GT for different training
+        # 4. 获取GT for different training
         if not (self.lidar_depth or self.dso_depth):
             # 如果既没有使用lidar，也没有使用dso的depth，就直接使用现成的npy (在image_depth_annotated).
             # 这其实就是在把return的GT换成mask
@@ -249,35 +288,43 @@ class KittiOdometryDataset(Dataset):
             # 一般lidar_depth和dso_depth只会设置一个True
             if self.lidar_depth:
                 # 使用lidar depth
-                if not self.annotated_lidar: # 如果不使用annotated_lidar数据，就
-                    # 
+                if not self.annotated_lidar: # 如果不使用annotated,但是是lidar数据，就转化成depth形式 depth(1~400)。应当是target sized image
                     lidar_depth = 1 / torch.tensor(sparse.load_npz(depth_folder / f"{(index + self._offset):06d}.npz").todense()).type(torch.float32).unsqueeze(0)
                     lidar_depth[torch.isinf(lidar_depth)] = 0
                     keyframe_depth = lidar_depth
-                else: # 使用lidar数据，并且annotated过了
+                else: # 使用lidar数据，并且annotated过了。
                     # lidar_depth=True; annotated=True
+                    # 预处理 - 转化成target sized depth map
                     keyframe_depth = self.preprocess_depth_annotated_lidar(Image.open(depth_folder / f"{(index + self._offset):06d}.png"), self._crop_boxes[dataset_index]).unsqueeze(0)
             else:
-                # 没有使用lidar depth. 设置为全0 depth矩阵
+                # 没有使用lidar depth. 设置为全0 depth矩阵 - target sized depth map
                 keyframe_depth = torch.zeros(1, self.target_image_size[0], self.target_image_size[1], dtype=torch.float32)
 
             if self.dso_depth:
+                # dso_depth的优先级 > lidar_depth，如果使用了dso，则优先dso
                 # dso_depth=True；使用了DSVO系统生成的image_sparse_depth
+                # 转成
                 dso_depth = self.preprocess_depth_dso(Image.open(depth_folder / f"{(index + self._offset):06d}.png"), self.dso_depth_parameters[dataset_index], self._crop_boxes[dataset_index]).unsqueeze(0)
                 mask = dso_depth == 0
                 dso_depth[mask] = keyframe_depth[mask]
                 keyframe_depth = dso_depth
 
-        # 使用
+        # 5. 获取key frame RGB，使用dataset[index+offset]的get_cam2
         keyframe = self.preprocess_image(
             (dataset.get_cam0 if not self.use_color else dataset.get_cam2)(index + self._offset),
             self._crop_boxes[dataset_index])
-        keyframe_pose = torch.tensor(dataset.poses[index + self._offset], dtype=torch.float32)
 
+        # 6. 获取kf的pose。(第index+一开始不要的几帧)
+        keyframe_pose = torch.tensor(dataset.poses[index + self._offset], dtype=torch.float32)  # cam0
+
+        # 7. 获取src frames - list
+        ## 取frame_count张
         frames = [self.preprocess_image((dataset.get_cam0 if not self.use_color else dataset.get_cam2)(index + self._offset + i + self.offset_d),
                                         self._crop_boxes[dataset_index]) for i in
                   range(-(self.frame_count // 2) * self.dilation, ((self.frame_count + 1) // 2) * self.dilation + 1, self.dilation) if i != 0]
+        # 8. 获取src frames的内参K - list - 其实元素都一样，只是重复了frame_count个
         intrinsics = [self._intrinsics[dataset_index] for _ in range(self.frame_count)]
+        # 9. 获取src frame的外参poses => cam0的GT pose
         poses = [torch.tensor(dataset.poses[index + self._offset + i + self.offset_d], dtype=torch.float32) for i in
                  range(-(self.frame_count // 2) * self.dilation, ((self.frame_count + 1) // 2) * self.dilation + 1, self.dilation) if i != 0]
 
@@ -292,7 +339,7 @@ class KittiOdometryDataset(Dataset):
             "image_id": torch.tensor([int(index + self._offset)], dtype=torch.int32)
         }
 
-        if self.return_stereo:
+        if self.return_stereo: # kf的另一个view的frame - static stereo frame
             stereoframe = self.preprocess_image(
                 (dataset.get_cam1 if not self.use_color else dataset.get_cam3)(index + self._offset),
                 self._crop_boxes[dataset_index])
@@ -319,6 +366,11 @@ class KittiOdometryDataset(Dataset):
             intrinsics - list - 是src frame的内参矩阵 K (4,4)
             sequence - tensor - 属于哪个sequence e.g. seq07 - 7
             image_id - tensor - 这个seq里的哪张图片 - 169
+            ############ [optional] 补充stereo frame ###############
+            stereoframe - tensor (3,256,512) - RGB - 对应kf time的另一个view的image
+            stereoframe_pose - tensor (4,4) - [R|t] - [R3 t3; 0 0 0 1] kf的内参
+            stereoframe_intrinsics - tensor (4,4) - K - kf camera intrinsics kf的外参
+            ############################################
         }
         keyframe_depth - tensor (1,256,512)
         '''
@@ -329,8 +381,8 @@ class KittiOdometryDataset(Dataset):
 
     def compute_depth_crop(self, depth_folder):
         # This function is only used for dense gt depth maps.
-        example_dm = np.load(depth_folder / "000000.npy")
-        ry = example_dm.shape[0] / self.target_image_size[0]
+        example_dm = np.load(depth_folder / "000000.npy")  # 获取给出的depth map
+        ry = example_dm.shape[0] / self.target_image_size[0]  # 放缩系数
         rx = example_dm.shape[1] / self.target_image_size[1]
         if ry < 1 or rx < 1:
             if ry >= rx:
@@ -355,32 +407,44 @@ class KittiOdometryDataset(Dataset):
             return ((o_w - w) // 2, 0, (o_w - w) // 2 + w, h)
 
     def compute_target_intrinsics(self, dataset, target_image_size, use_color):
+        '''
+        每个
+        Input: 
+            dataset - <class 'pykitti.odometry.odometry'>
+            target_image_size - (256,512)
+            use_color - true: gray; false: RGB
+        Output:
+            box - 取原图的中心位置。代表的是4个点的坐标 (w左,h上,w右,h下)
+            intrinsic - 新的K矩阵的4个系数(f_x, f_y, c_x, c_y)
+        '''
         # Because of cropping and resizing of the frames, we need to recompute the intrinsics
-        P_cam = dataset.calib.P_rect_00 if not use_color else dataset.calib.P_rect_20
-        orig_size = tuple(reversed((dataset.cam0 if not use_color else dataset.cam2).__next__().size))
+        P_cam = dataset.calib.P_rect_00 if not use_color else dataset.calib.P_rect_20       # 1 获取 image02 的3*4 K矩阵
+        orig_size = tuple(reversed((dataset.cam0 if not use_color else dataset.cam2).__next__().size)) # 2 初始的image02 的原始size
+        # 3 我们已经有target image的size
 
-        r_orig = orig_size[0] / orig_size[1]
-        r_target = target_image_size[0] / target_image_size[1]
+        # 4 通过两个size进行计算，得出intrinsics和box
+        r_orig = orig_size[0] / orig_size[1] # 原图 H/W
+        r_target = target_image_size[0] / target_image_size[1] # target H/W
 
-        if r_orig >= r_target:
-            new_height = r_target * orig_size[1]
-            box = (0, (orig_size[0] - new_height) // 2, orig_size[1], orig_size[0] - (orig_size[0] - new_height) // 2)
+        if r_orig >= r_target: # 原图比target 竖直方向更长
+            new_height = r_target * orig_size[1]   # new height for 原图
+            box = (0, (orig_size[0] - new_height) // 2, orig_size[1], orig_size[0] - (orig_size[0] - new_height) // 2) # 0，新h起点，W，新h终点
 
-            c_x = P_cam[0, 2] / orig_size[1]
-            c_y = (P_cam[1, 2] - (orig_size[0] - new_height) / 2) / new_height
+            c_x = P_cam[0, 2] / orig_size[1]    # 新K中的tx => 原始的tx/新图的总W
+            c_y = (P_cam[1, 2] - (orig_size[0] - new_height) / 2) / new_height  # 新K中的tx => 原始的tx/新图的总W
 
-            rescale = orig_size[1] / target_image_size[1]
+            rescale = orig_size[1] / target_image_size[1]  # 放缩系数
 
-        else:
+        else:  # 原图比target 更宽
             new_width = orig_size[0] / r_target
-            box = ((orig_size[1] - new_width) // 2, 0, orig_size[1] - (orig_size[1] - new_width) // 2, orig_size[0])
+            box = ((orig_size[1] - new_width) // 2, 0, orig_size[1] - (orig_size[1] - new_width) // 2, orig_size[0])  # 新w起点，0，新w终点,h
 
             c_x = (P_cam[0, 2] - (orig_size[1] - new_width) / 2) / new_width
             c_y = P_cam[1, 2] / orig_size[0]
 
             rescale = orig_size[0] / target_image_size[0]
 
-        f_x = P_cam[0, 0] / target_image_size[1] / rescale
+        f_x = P_cam[0, 0] / target_image_size[1] / rescale  # fx * w/target_h = 初始的fx/w
         f_y = P_cam[1, 1] / target_image_size[0] / rescale
 
         intrinsics = (f_x, f_y, c_x, c_y)
@@ -391,7 +455,7 @@ class KittiOdometryDataset(Dataset):
         # Info required to process d(v)so depths
         P_cam =  dataset.calib.P_rect_20
         orig_size = tuple(reversed(dataset.cam2.__next__().size))
-        return orig_size[0], orig_size[1], P_cam[0, 0]
+        return orig_size[0], orig_size[1], P_cam[0, 0]  # H, W, 原始fx
 
     def get_index(self, sequence, index):
         for i in range(len(self.sequences)):
@@ -403,6 +467,13 @@ class KittiOdometryDataset(Dataset):
 
 
 def format_intrinsics(intrinsics, target_image_size):
+    '''
+    input
+        intrinsics - (f_x, f_y, c_x, c_y)
+        target_image_size - (256,512)
+    output
+        intrinsics_mat - 4*4的新K矩阵
+    '''
     intrinsics_mat = torch.zeros(4, 4)
     intrinsics_mat[0, 0] = intrinsics[0] * target_image_size[1]
     intrinsics_mat[1, 1] = intrinsics[1] * target_image_size[0]
@@ -414,6 +485,7 @@ def format_intrinsics(intrinsics, target_image_size):
 
 
 class ColorJitterMulti(torchvision.transforms.ColorJitter):
+    # 就是个color aug的function
     def fix_transform(self):
         self.transform = self.get_params(self.brightness, self.contrast,
                                          self.saturation, self.hue)
