@@ -25,7 +25,7 @@
       "type": "NuscenesDataloader",
       "args": {
         "version": "v1.0-mini",
-        "dataset_dir": "../data/nuscenes-mini/",
+        "dataset_dir": "../data/nuscenes-mini/v1.0-mini",
         "batch_size": 2,
         "frame_count": 2,
         "shuffle": false,

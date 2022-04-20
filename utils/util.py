@@ -232,7 +232,7 @@ def dilate_mask(m: torch.Tensor, size: int = 15):
 
 
 def operator_on_dict(dict_0: dict, dict_1: dict, operator, default=0):
-    keys = set(dict_0.keys()).union(set(dict_1.keys()))
+    keys = set(dict_0.keys()).union(set(dict_1.keys()))  # 并集
     results = {}
     for k in keys:
         v_0 = dict_0[k] if k in dict_0 else default
