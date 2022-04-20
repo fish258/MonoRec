@@ -1,0 +1,59 @@
+{
+    "name": "Eval_monorec",
+    "n_gpu": 1,
+    "timestamp_replacement": "00",
+    "models": [
+      {
+        "type": "MonoRecModel",
+        "args": {
+          "inv_depth_min_max": [
+            0.33,
+            0.0025
+          ],
+          "checkpoint_location": [
+            "saved/checkpoints/monorec_depth_ref.pth"
+          ],
+          "pretrain_mode": 0,
+          "pretrain_dropout": 0,
+          "use_stereo": false,
+          "use_mono": true,
+          "use_ssim": 1
+        }
+      }
+    ],
+    "data_loader": {
+      "type": "NuscenesDataloader",
+      "args": {
+        "version": "v1.0-mini",
+        "dataset_dir": "../data/nuscenes-mini/",
+        "batch_size": 2,
+        "frame_count": 2,
+        "shuffle": false,
+        "validation_split": 0,
+        "num_workers": 4,
+        "target_image_size": [
+          256,
+          512
+        ],
+        "use_color_augmentation": false
+      }
+    },
+    "loss": "depth_loss",
+    "metrics": [
+      "abs_rel_sparse_metric",
+      "sq_rel_sparse_metric",
+      "rmse_sparse_metric",
+      "rmse_log_sparse_metric",
+      "a1_sparse_metric",
+      "a2_sparse_metric",
+      "a3_sparse_metric"
+    ],
+    "evaluater": {
+      "save_dir": "saved/",
+      "max_distance": 80,
+      "verbosity": 2,
+      "log_step": 20,
+      "tensorboard": false
+    }
+  }
+  

@@ -7,6 +7,7 @@ from cv2 import randShuffle
 import random
 import os
 import os.path as osp
+# pip install nuscenes-devkit &> /dev/null
 from nuscenes.utils.data_classes import LidarPointCloud, RadarPointCloud, Box
 from pyquaternion import Quaternion
 from nuscenes.utils.geometry_utils import view_points, box_in_image, BoxVisibility, transform_matrix
@@ -39,7 +40,7 @@ def map_fn(batch, fn):
         return fn(batch)
 
 
-class NuScenesDataset(Dataset):
+class NuscenesDataset(Dataset):
 
     def __init__(self, version: str = 'v1.0-mini',dataset_dir: str = '../../data/nuscenes-mini/v1.0-mini', 
                 pointsensor_channel: str = 'LIDAR_TOP', camera_channel: str = 'CAM_FRONT',

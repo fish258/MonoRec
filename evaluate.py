@@ -8,7 +8,7 @@ import numpy as np
 import data_loader.data_loaders as module_data
 import model.loss as module_loss
 import model.metric as module_metric
-import model.model as module_arch
+import model.model as module_arch  # monorec model
 from evaluater import Evaluater
 from utils.parse_config import ConfigParser
 
@@ -26,7 +26,7 @@ def main(config: ConfigParser):
     # build model architecture, then print to console
 
     if "arch" in config.config:
-        models = [config.initialize('arch', module_arch)]
+        models = [config.initialize('arch', module_arch)]    # monorec model
     else:
         models = config.initialize_list("models", module_arch)
 
@@ -55,7 +55,9 @@ def main(config: ConfigParser):
 
         logger.info(model_dict)
         logger.info(dataset_dict)
+        print("############################ start eval ##########################")
         evaluater = Evaluater(model, loss, metrics, config=config, data_loader=data_loader)
+        print("############################ end eval ##########################")
         result = evaluater.eval(i)
         result["metrics"] = result["metrics"]
         del model
