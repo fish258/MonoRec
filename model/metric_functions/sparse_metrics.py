@@ -41,7 +41,7 @@ def rmse_metric(data_dict: dict, roi=None, max_distance=None):
     depth_gt = data_dict["target"]
     depth_prediction, depth_gt = preprocess_roi(depth_prediction, depth_gt, roi)
     depth_prediction, depth_gt = get_positive_depth(depth_prediction, depth_gt)
-    depth_prediction, depth_gt = get_absolute_depth(depth_prediction, depth_gt, max_distance)
+    depth_prediction, depth_gt = get_absolute_depth(depth_prediction, depth_gt, max_distance)  # inv_depth to depth map
 
     se = (depth_prediction - depth_gt) ** 2
     return torch.mean(torch.sqrt(torch.mean(se, dim=[1, 2, 3])))

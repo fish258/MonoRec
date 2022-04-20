@@ -37,6 +37,7 @@ def to(data, device):
 eps = 1e-6
 
 def preprocess_roi(depth_prediction, depth_gt: torch.Tensor, roi):
+    # region of image
     if roi is not None:
         if isinstance(depth_prediction, list):
             depth_prediction = [dpr[:, :, roi[0]:roi[1], roi[2]:roi[3]] for dpr in depth_prediction]
@@ -47,8 +48,10 @@ def preprocess_roi(depth_prediction, depth_gt: torch.Tensor, roi):
 
 
 def get_absolute_depth(depth_prediction, depth_gt: torch.Tensor, max_distance=None):
+    # inv_depth to depth map
     if max_distance is not None:
         if isinstance(depth_prediction, list):
+            # 先把超过最远距离的设置成最远距离
             depth_prediction = [torch.clamp_min(dpr, 1 / max_distance) for dpr in depth_prediction]
         else:
             depth_prediction = torch.clamp_min(depth_prediction, 1 / max_distance)
@@ -102,9 +105,12 @@ def save_intrinsics_for_tsdf(dir: Path, intrinsics, crop=None):
 
 
 def get_mask(pred: torch.Tensor, gt: torch.Tensor, max_distance=None, pred_all_valid=True):
-    mask = gt == 0
+    # mask中true代表的是filter out部分
+    # mask掉没有depth的地方
+    mask = gt == 0   # invalid区域设置为true
     if max_distance:
-        mask |= (gt < 1 / max_distance)
+        # 超过max distance的区域也不要
+        mask |= (gt < 1 / max_distance)  # 满足的设置为true
     if not pred_all_valid:
         mask |= pred == 0
     return mask
@@ -112,7 +118,8 @@ def get_mask(pred: torch.Tensor, gt: torch.Tensor, max_distance=None, pred_all_v
 
 def mask_mean(t: torch.Tensor, m: torch.Tensor, dim=None):
     t = t.clone()
-    t[m] = 0
+    t[m] = 0    # 滤掉invalid部分
+    ####### 从而只算valid部分
     els = 1
     if dim is None:
         dim = list(range(len(t.shape)))
