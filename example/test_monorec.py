@@ -8,7 +8,7 @@ import sys
 sys.path.append("..")
 
 from data_loader.kitti_odometry_dataset import KittiOdometryDataset
-from data_loader.nuscene_dataset import NuScenesDataset
+from data_loader.nuscenes_dataset import NuScenesDataset
 from model.monorec.monorec_model import MonoRecModel
 from utils import unsqueezer, map_fn, to
 

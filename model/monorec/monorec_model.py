@@ -151,7 +151,7 @@ class CostVolumeModule(nn.Module):
         start_time = time.time()
         keyframe = data_dict["keyframe"]     # 获取ref view
         keyframe_intrinsics = data_dict["keyframe_intrinsics"]   # 获取ref view的K
-        keyframe_pose = data_dict["keyframe_pose"]               # 
+        keyframe_pose = data_dict["keyframe_pose"]               # ref view的extrinsic
 
         frames = []
         intrinsics = []
@@ -184,7 +184,7 @@ class CostVolumeModule(nn.Module):
             depths = (1 / torch.linspace(data_dict["inv_depth_max"][0].item(), data_dict["inv_depth_min"][0].item(), data_dict["cv_depth_steps"][0].item(),
                                     device=keyframe.device)).view(1, -1, 1, 1).expand(batch_size, -1, height, width)
 
-        backproject_depth = Backprojection(1, height, width)
+        backproject_depth = Backprojection(1, height, width)   # 
         backproject_depth.to(keyframe.device)
 
         cost_volumes = []
@@ -204,6 +204,7 @@ class CostVolumeModule(nn.Module):
             warped_masks = []   # 记录valid区域
 
             for i, image in enumerate(frames):
+                # 遍历frames
                 t = extrinsics[i][batch_nr] @ keyframe_pose[batch_nr]
                 pix_coords = point_projection(cam_points, depth_value_count, height, width, intrinsics[i][batch_nr].unsqueeze(0), t.unsqueeze(0)).clamp(-2, 2)
 

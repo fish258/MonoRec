@@ -30,7 +30,7 @@
         "frame_count": 2,
         "shuffle": false,
         "validation_split": 0,
-        "num_workers": 4,
+        "num_workers": 0,
         "target_image_size": [
           256,
           512

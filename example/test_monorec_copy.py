@@ -6,9 +6,10 @@ import torch
 
 import sys
 sys.path.append("..")
+# sys.path.append("/Users/handsomeb/MChan/Pg_ANU/S3_8603/MonoRec")
 
 from data_loader.kitti_odometry_dataset import KittiOdometryDataset
-from data_loader.nuscene_dataset import NuScenesDataset
+from data_loader.nuscenes_dataset import NuscenesDataset
 from model.monorec.monorec_model import MonoRecModel
 from utils import unsqueezer, map_fn, to
 from matplotlib import cm
@@ -18,16 +19,17 @@ target_image_size = (256, 512) # 测试图片大小; 原始大小为(370,1226)
 
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
-# dataset = NuScenesDataset()
-dataset = KittiOdometryDataset("data/kitti", sequences=["07"], target_image_size=target_image_size, frame_count=2,
-                               depth_folder="image_depth_annotated", lidar_depth=True, use_dso_poses=True,
-                               use_index_mask=None)
-# Next three lines are a hack required because Kitti files are incomplete
-dataset._dataset_sizes = [1000]
-dataset._datasets[0].cam2_files = [f"data/kitti/sequences/07/image_2/{i:06d}.png" for i in range(dataset._dataset_sizes[0])] # 'data/kitti/sequences/07/image_2/0~999.png'
-dataset._datasets[0].cam3_files = [f"data/kitti/sequences/07/image_3/{i:06d}.png" for i in range(dataset._dataset_sizes[0])]
+dataset = NuscenesDataset()
+# dataset = KittiOdometryDataset("data/kitti", sequences=["07"], target_image_size=target_image_size, frame_count=2,
+#                                depth_folder="image_depth_annotated", lidar_depth=True, use_dso_poses=True,
+#                                use_index_mask=None)
+# # Next three lines are a hack required because Kitti files are incomplete
+# dataset._dataset_sizes = [1000]
+# dataset._datasets[0].cam2_files = [f"data/kitti/sequences/07/image_2/{i:06d}.png" for i in range(dataset._dataset_sizes[0])] # 'data/kitti/sequences/07/image_2/0~999.png'
+# dataset._datasets[0].cam3_files = [f"data/kitti/sequences/07/image_3/{i:06d}.png" for i in range(dataset._dataset_sizes[0])]
 
 ## 设置pretrained model位置
+# checkpoint_location = Path("../saved/checkpoints/monorec_depth_ref.pth")
 checkpoint_location = Path("../saved/checkpoints/monorec_depth_ref.pth")
 
 ## 定义inv depth范围
@@ -40,7 +42,7 @@ monorec_model.to(device)
 monorec_model.eval()
 
 print("Fetching data...")
-index = 164
+index = 10
 # Corresponds to image index 169
 
 batch, depth = dataset.__getitem__(index)  # batch - dict; depth - tensor(1,W=256,H=512)

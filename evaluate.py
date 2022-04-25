@@ -79,8 +79,8 @@ def main(config: ConfigParser):
         result["metrics_info"] = [metric.__name__ for metric in metrics]
         logger.info(result)
         results.append({
-            "model": model_dict,
-            "dataset": dataset_dict,
+            # "model": model_dict,
+            # "dataset": dataset_dict,
             "result": result
         })
 

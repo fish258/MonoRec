@@ -477,7 +477,7 @@ class NuscenesDataset(Dataset):
         #############################  待完成  ##########################################
         ## 获取depth的lidar points
         ## 在这由于太稀疏了，所以不使用之前的preprocess了 
-        pts, depth, keyimg = self.map_pointcloud_to_image(self.nusc, key_pointsensor_token, key_camera_token, key_sample, nsweeps=3)
+        pts, depth, keyimg = self.map_pointcloud_to_image(self.nusc, key_pointsensor_token, key_camera_token, key_sample, nsweeps=1)
         '''
         pts - [3,n] - 第一行是height coor, 第二行是width coor, 第三行是1
         depth - [n,] - depth value
@@ -489,8 +489,8 @@ class NuscenesDataset(Dataset):
         '''
         token, sample_token, ego_pose_token, calibrated_sensor_token, filename, channel, is_key_frame, prev, next - 这指的就是sweep了
         '''
-        key_intrinsic_data = self.nusc.get('calibrated_sensor', key_camData['calibrated_sensor_token'])
-        key_intrinsic_K = np.array(key_intrinsic_data["camera_intrinsic"])   # 3*3 K
+        key_calib_data = self.nusc.get('calibrated_sensor', key_camData['calibrated_sensor_token'])
+        key_intrinsic_K = np.array(key_calib_data["camera_intrinsic"])   # 3*3 K
         
         ## 3. 根据target size，预处理原图，K，depth map
         ### 3.1 获取K新系数，crop box
@@ -509,11 +509,14 @@ class NuscenesDataset(Dataset):
 
         # 4. 获取keyframe的pose mat
         key_ego_pose_token = key_camData["ego_pose_token"]
-        keyframe_pose_data = self.nusc.get("ego_pose", key_ego_pose_token)  # ego pose metadata
-        keyframe_pose = self.get_ego_pose(keyframe_pose_data)
+        keyframe_ego_pose_data = self.nusc.get("ego_pose", key_ego_pose_token)  # ego pose metadata
+        ## 4.1 获取keyframe的 world2car: ego R｜T
+        keyframe_world2car_pose = self.get_ego_pose(keyframe_ego_pose_data)  # ego pose
+        ## 4.2 获取keyframe的 car2cam: extrinsic mat
+        keyframe_car2cam_pose = self.get_ego_pose(key_calib_data)
+        ## 4.3 获取final keyframe pose
+        keyframe_pose = keyframe_world2car_pose @ keyframe_car2cam_pose   # ego @ calib
 
-        
-        
         # 5.获取src的数据
         ### 5.0 准备工作
         src_samples = []  # 按照顺序的src samples
@@ -551,7 +554,11 @@ class NuscenesDataset(Dataset):
             # 5.3 加入poses
             src_ego_pose_token = src_camData["ego_pose_token"]
             srcframe_pose_data = self.nusc.get("ego_pose", src_ego_pose_token)
-            poses.append(self.get_ego_pose(srcframe_pose_data))
+            srcframe_world2car_pose = self.get_ego_pose(srcframe_pose_data)
+            srcframe_car2cam_pose = keyframe_car2cam_pose   # 这个对于key和src的是一样的
+            # srcframe_pose = srcframe_car2cam_pose @  srcframe_world2car_pose
+            srcframe_pose = srcframe_world2car_pose @ srcframe_car2cam_pose
+            poses.append(srcframe_pose)
 
         data = {
             "keyframe": keyimg_tensor,
