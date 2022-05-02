@@ -22,7 +22,7 @@ def main(config: ConfigParser):
     # get function handles of loss and metrics
     loss = getattr(module_loss, config['loss'])  # 1个 depth_loss
     # print("loss: ", loss)
-    metrics = [getattr(module_metric, met) for met in config['metrics']]  # 7个
+    metrics = [getattr(module_metric, met) for met in config['metrics']]  # 7个 sparse metrics,里边是7个<function abs_rel_sparse_metris at 0x7fab...90>对象
     # print("metrics: ", metrics)
 
     # build model architecture, then print to console
@@ -35,7 +35,7 @@ def main(config: ConfigParser):
     results = []
     for i, model in enumerate(models):   # 就一个model
         model_dict = dict(model.__dict__)   # 获取model 参数
-        keys = list(model_dict.keys())
+        keys = list(model_dict.keys()) # length=33
         '''
         dict_keys(['training', '_parameters', '_buffers', '_non_persistent_buffers_set', 
         '_backward_hooks', '_is_full_backward_hook', '_forward_hooks', '_forward_pre_hooks', 
@@ -47,17 +47,17 @@ def main(config: ConfigParser):
         '''
         for k in keys:
             if k.startswith("_"):
+                # 删掉没用的一些keys
                 model_dict.__delitem__(k)
             elif type(model_dict[k]) == np.ndarray:
+                # 只保留有用的ndarray的keys
                 model_dict[k] = list(model_dict[k])
+                # 跳出循环，model_dict只剩23 length
 
 
         dataset_dict = dict(data_loader.dataset.__dict__)   # 获取dataset的参数
-        keys = list(dataset_dict.keys())   # 代表的是dataset的init paras
-        '''
-        ['dataset_dir', 'frame_count', 'target_image_size', 'offset_d', 'nusc', 'pointsensor_channel', 
-        'camera_channel', '_offset', 'length', 'dilation', 'use_color_augmentation', 'return_mvobj_mask']
-        '''
+        ''' dataset_dict的dict: 例如dataset_dir="../data/../v1.0-mini",length=404,_offset=4 之类的 camera_channel="CAM_FRONT"'''
+        keys = list(dataset_dict.keys())   # 代表的是dataset的init paras # length=11
         for k in keys:
             if k.startswith("_"):
                 dataset_dict.__delitem__(k)
@@ -69,11 +69,12 @@ def main(config: ConfigParser):
 
         logger.info(model_dict)
         logger.info(dataset_dict)
-        print("############################ start eval ##########################")
+        
         # 传入了模型，loss，需要记录的metrics，config，测试数据
         evaluater = Evaluater(model, loss, metrics, config=config, data_loader=data_loader)
-        print("############################ end eval ##########################")
+        print("############################ start eval ##########################")
         result = evaluater.eval(i)  # eval 0th model
+        print("############################ end eval ##########################")
         result["metrics"] = result["metrics"]
         del model
         result["metrics_info"] = [metric.__name__ for metric in metrics]
@@ -92,7 +93,7 @@ def main(config: ConfigParser):
 
 if __name__ == "__main__":
     args = argparse.ArgumentParser(description='Deeptam Evaluation')
-    args.add_argument('-c', '--config', default=None, type=str,
+    args.add_argument('-c', '--config', default='configs/evaluate/eval_monorec_nusc.json', type=str,
                       help='config file path (default: None)')
     args.add_argument('-d', '--device', default=None, type=str,
                       help='indices of GPUs to enable (default: all)')

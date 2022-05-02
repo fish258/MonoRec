@@ -134,13 +134,13 @@ def rmse_log_sparse_metric(data_dict: dict, roi=None, max_distance=None, pred_al
 
 
 def abs_rel_sparse_metric(data_dict: dict, roi=None, max_distance=None, pred_all_valid=True, use_cvmask=False):
-    depth_prediction = data_dict["result"]
-    depth_gt = data_dict["target"]
-    depth_prediction, depth_gt = preprocess_roi(depth_prediction, depth_gt, roi)
-    mask = get_mask(depth_prediction, depth_gt, max_distance=max_distance, pred_all_valid=pred_all_valid)
+    depth_prediction = data_dict["result"]   # 这是inverse的 [B,1,256,512]
+    depth_gt = data_dict["target"]           # 这是inverse的 [B,1,256,512]
+    depth_prediction, depth_gt = preprocess_roi(depth_prediction, depth_gt, roi)  # resize of images
+    mask = get_mask(depth_prediction, depth_gt, max_distance=max_distance, pred_all_valid=pred_all_valid) # true不参与计算
     if use_cvmask: mask |= ~ (data_dict["mvobj_mask"] > .5)
-    depth_prediction, depth_gt = get_positive_depth(depth_prediction, depth_gt)
-    depth_prediction, depth_gt = get_absolute_depth(depth_prediction, depth_gt, max_distance)
+    depth_prediction, depth_gt = get_positive_depth(depth_prediction, depth_gt)   # 只取positive part
+    depth_prediction, depth_gt = get_absolute_depth(depth_prediction, depth_gt, max_distance)   # inv depth -> abs depth，且设置最远距离80
     return abs_rel_base(depth_prediction, depth_gt, mask)
 
 

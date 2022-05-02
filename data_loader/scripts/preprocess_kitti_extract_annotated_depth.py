@@ -33,7 +33,7 @@ def main():
     drives = mapping.keys()
 
     print("Creating folder structure")
-    for drive in drives:
+    for drive in drives:  # "2011_10_03_drive_0027": "00"
         sequence = mapping[drive]
         folder = output/ "sequences" / sequence / depth_folder
         folder.mkdir(parents=True, exist_ok=True)
@@ -41,7 +41,7 @@ def main():
 
     print("Extracting enhanced depth maps")
 
-    with ZipFile(input) as depth_archive:
+    with ZipFile(input) as depth_archive:   # lidar depth maps can be extracted into the given folder structure
         for name in depth_archive.namelist():
             if name[0] == "t":
                 drive = name[6:27]

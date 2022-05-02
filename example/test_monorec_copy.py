@@ -42,7 +42,7 @@ monorec_model.to(device)
 monorec_model.eval()
 
 print("Fetching data...")
-index = 10
+index = 88
 # Corresponds to image index 169
 
 batch, depth = dataset.__getitem__(index)  # batch - dict; depth - tensor(1,W=256,H=512)

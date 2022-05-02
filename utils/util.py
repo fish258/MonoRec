@@ -52,10 +52,11 @@ def get_absolute_depth(depth_prediction, depth_gt: torch.Tensor, max_distance=No
     if max_distance is not None:
         if isinstance(depth_prediction, list):
             # 先把超过最远距离的设置成最远距离
+            # clamp_min设置了一个下限，把所有小于的设置成下限
             depth_prediction = [torch.clamp_min(dpr, 1 / max_distance) for dpr in depth_prediction]
         else:
             depth_prediction = torch.clamp_min(depth_prediction, 1 / max_distance)
-        depth_gt = torch.clamp_min(depth_gt, 1 / max_distance)
+        depth_gt = torch.clamp_min(depth_gt, 1 / max_distance)  # 没有数据的点，也变成了最远距离
     if isinstance(depth_prediction, list):
         return [1 / dpr for dpr in depth_prediction], 1 / depth_gt
     else:
@@ -107,24 +108,32 @@ def save_intrinsics_for_tsdf(dir: Path, intrinsics, crop=None):
 def get_mask(pred: torch.Tensor, gt: torch.Tensor, max_distance=None, pred_all_valid=True):
     # mask中true代表的是filter out部分
     # mask掉没有depth的地方
+    # mask掉不要的地方，true的地方不参与计算
     mask = gt == 0   # invalid区域设置为true
     if max_distance:
         # 超过max distance的区域也不要
-        mask |= (gt < 1 / max_distance)  # 满足的设置为true
+        mask |= (gt < 1 / max_distance)  # 大于max_distance的为true, 相当于d1.update(d2)
     if not pred_all_valid:
+        # false，不是pred 所有 valid
         mask |= pred == 0
     return mask
 
 
 def mask_mean(t: torch.Tensor, m: torch.Tensor, dim=None):
+    '''
+    t - [B,1,256,512] - 求的target和abs的差值
+    m - [B,1,256,512]
+    '''
     t = t.clone()
-    t[m] = 0    # 滤掉invalid部分
+    t[m] = 0    # mask的true部分为0
     ####### 从而只算valid部分
     els = 1
     if dim is None:
+        # dim = [B,1,256,512]
         dim = list(range(len(t.shape)))
     for d in dim:
         els *= t.shape[d]
+    # (els - torch.sum(m.to(torch.float), dim=dim) 代表mask中false的总数
     return torch.sum(t, dim=dim) / (els - torch.sum(m.to(torch.float), dim=dim))
 
 

@@ -287,12 +287,12 @@ class KittiOdometryDataset(Dataset):
         else:
             # 一般lidar_depth和dso_depth只会设置一个True
             if self.lidar_depth:
-                # 使用lidar depth
+                # 使用lidar depth, eval使用的是这个！！！！！！
                 if not self.annotated_lidar: # 如果不使用annotated,但是是lidar数据，就转化成depth形式 depth(1~400)。应当是target sized image
                     lidar_depth = 1 / torch.tensor(sparse.load_npz(depth_folder / f"{(index + self._offset):06d}.npz").todense()).type(torch.float32).unsqueeze(0)
                     lidar_depth[torch.isinf(lidar_depth)] = 0
                     keyframe_depth = lidar_depth
-                else: # 使用lidar数据，并且annotated过了。
+                else: # 使用lidar数据，并且annotated过了。 eval使用的是这个！！！！！！
                     # lidar_depth=True; annotated=True
                     # 预处理 - 转化成target sized depth map
                     keyframe_depth = self.preprocess_depth_annotated_lidar(Image.open(depth_folder / f"{(index + self._offset):06d}.png"), self._crop_boxes[dataset_index]).unsqueeze(0)

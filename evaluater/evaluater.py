@@ -35,7 +35,7 @@ class Evaluater(BaseTrainer):
         # 没有set就设置为None
         self.roi = config["evaluater"].get("roi", None)
         self.alpha = config["evaluater"].get("alpha", None)
-        self.max_distance = config["evaluater"].get("max_distance", None)
+        self.max_distance = config["evaluater"].get("max_distance", None)  # 80
         self.correct_length = config["evaluater"].get("correct_length", False)
         self.median_scaling = config["evaluater"].get("median_scaling", False)
 
@@ -44,6 +44,7 @@ class Evaluater(BaseTrainer):
         for i, metric in enumerate(self.metrics):  # 对于每个metrics都for一次
             if self.median_scaling:
                 data_dict = median_scaling(data_dict)
+            # 运行function, abs_rel_sparse_metrics
             acc_metrics[i] += metric(data_dict, self.roi, self.max_distance)
             #self.writer.add_scalar('{}'.format(metric.__name__), acc_metrics[i])
         if np.any(np.isnan(acc_metrics)):
@@ -73,6 +74,7 @@ class Evaluater(BaseTrainer):
 
         total_loss = 0   # 初始化 loss = 0
         total_loss_dict = {}
+        # 1.初始化7个metrics的值
         total_metrics = np.zeros(len(self.metrics))   # (7,) - 7个0
         total_metrics_valid = np.zeros(len(self.metrics))  # (7,) - 7个0
 
@@ -81,8 +83,8 @@ class Evaluater(BaseTrainer):
 
         for batch_idx, (data, target) in enumerate(self.data_loader):
             # 读取数据
-            data, target = to(data, self.device), to(target, self.device)
-            data["target"] = target
+            data, target = to(data, self.device), to(target, self.device)  # data-dict: keyframe-[B,3,256,512],keyframe_pose-[B,4,4]
+            data["target"] = target  # 把target增加到data dict中去
 
             with torch.no_grad():
                 data = self.model(data)
@@ -90,8 +92,8 @@ class Evaluater(BaseTrainer):
                 loss_dict = {"loss": torch.tensor([0])}   # 后续的也是0
                 loss = loss_dict["loss"]
             
-            # result - tensor [1,1,256,512] - 最终的depth map image
-            output = data["result"]
+            # result - tensor [B,1,256,512] - 最终的depth map image
+            output = data["result"]  # 测试一个，是0.1896～0.0025，即5.27m～400m
 
             #self.writer.set_step((model_index - 1) * self.len_data + batch_idx)
             #self.writer.add_scalar('loss', loss.item())
@@ -99,7 +101,7 @@ class Evaluater(BaseTrainer):
             total_loss += loss.item()
             total_loss_dict = operator_on_dict(total_loss_dict, loss_dict, operator.add)   # 每个metrics的数都相加
             ## 求这次data的metrics指标
-            metrics, valid = self._eval_metrics(data)
+            metrics, valid = self._eval_metrics(data)  # metrics是[7个metric，如果不valid，则置0]，valid代表[每个metric处是否valid]
             total_metrics += metrics  ## 求和
             total_metrics_valid += valid
 
@@ -113,7 +115,9 @@ class Evaluater(BaseTrainer):
 
             if batch_idx % self.log_step == 0:  # 每20个batch打印一次
                 # 形式为: 20%进度，loss指标，平均metrics指标
-                self.logger.debug(f'Evaluating {self._progress(batch_idx)} Loss: {loss.item() / (batch_idx + 1):.6f} Metrics: {list(total_metrics / (batch_idx + 1))}')
+                self.logger.debug(f'111Evaluating {self._progress(batch_idx)} Loss: {loss.item() / (batch_idx + 1):.6f} Metrics: {list(total_metrics / (batch_idx + 1))}')
+                self.logger.debug(f'222Evaluating {self._progress(batch_idx)} Loss: {loss.item() / (batch_idx + 1):.6f} Metrics: {list(total_metrics / total_metrics_valid)}')
+                # np.array(list((map('{:.6f}%'.format,total_metrics_valid))))
                 #self.writer.add_image('input', make_grid(to(data["keyframe"], "cpu"), nrow=3, normalize=True))
                 #self.writer.add_image('output', make_grid(to(torch.clamp(1 / output, 0, 100), "cpu") , nrow=3, normalize=True))
                 #self.writer.add_image('ground_truth', make_grid(to(torch.clamp(1 / target, 0, 100), "cpu"), nrow=3, normalize=True))
