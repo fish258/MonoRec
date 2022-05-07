@@ -22,7 +22,7 @@
       }
     ],
     "data_loader": {
-      "type": "NuscenesDataloader",
+      "type": "NuscenesDataloader3",
       "args": {
         "version": "v1.0-test",
         "dataset_dir": "../test_nuscenes",

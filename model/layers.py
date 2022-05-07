@@ -61,10 +61,10 @@ class Backprojection(nn.Module):
         return cam_p_h
 
 def point_projection(points3D, batch_size, height, width, K, T):
-    N, H, W = batch_size, height, width
-    cam_coord = torch.matmul(torch.matmul(K, T)[:, :3, :], points3D)
-    img_coord = cam_coord[:, :2, :] / (cam_coord[:, 2:3, :] + 1e-7)
-    img_coord[:, 0, :] /= W - 1
+    N, H, W = batch_size, height, width  # 32,256,512
+    cam_coord = torch.matmul(torch.matmul(K, T)[:, :3, :], points3D)    # points3D - [32,4,256*512] - [x,y,d,1]。就到了src cam坐标系
+    img_coord = cam_coord[:, :2, :] / (cam_coord[:, 2:3, :] + 1e-7)     # [32,3,256*512]->[32,2,256*512] - [x,y,d]->[x,y] # src cam coor压缩到depth=1的平面
+    img_coord[:, 0, :] /= W - 1   # 缩放到img coor
     img_coord[:, 1, :] /= H - 1
     img_coord = (img_coord - 0.5) * 2
     img_coord = img_coord.view(N, 2, H, W).permute(0, 2, 3, 1)

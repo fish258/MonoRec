@@ -259,6 +259,27 @@ def operator_on_dict(dict_0: dict, dict_1: dict, operator, default=0):
 
 numbers = [f"{i:d}" for i in range(1, 10, 1)]
 
+def point_projection_modified(points3D, batch_size, height, width, K, T):
+    '''
+    由于monorec的depth plane有距离非常近的, 所以在next frame的投影中, 如果src和ref cam距离比较远,就会出现翻转的现象,为了不出现这种现象,特此修改版本
+    '''
+    N, H, W = batch_size, height, width  # 32,256,512
+    cam_coord = torch.matmul(torch.matmul(K, T)[:, :3, :], points3D)    # points3D - [32,4,256*512] - [x,y,d,1]。就到了src cam坐标系
+    img_coord = cam_coord[:, :2, :] / (cam_coord[:, 2:3, :] + 1e-7)     # [32,3,256*512]->[32,2,256*512] - [x,y,d]->[x,y] # src cam coor压缩到depth=1的平面
+    img_coord[:, 0, :] /= W - 1   # 缩放到img coor
+    img_coord[:, 1, :] /= H - 1
+    img_coord = (img_coord - 0.5) * 2
+    img_coord = img_coord.view(N, 2, H, W).permute(0, 2, 3, 1)
+    return_img_coord = img_coord.clone()
+    for i in range(img_coord.shape[0]):
+        u0,v0 = img_coord[i,0,0,:]
+        u1,v1 = img_coord[i,1,1,:]
+        if u0>u1 and v0>v1:
+            return_img_coord[i:,:,:,:] = 10000  # 设置成无穷处的坐标，无法取到有效rgb
+            break
+        else:
+            continue
+    return return_img_coord
 
 def filter_state_dict(state_dict, data_parallel=False):
     if data_parallel:

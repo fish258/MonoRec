@@ -5,6 +5,7 @@ from .oxford_robotcar_dataset import OxfordRobotCarDataset
 from .tum_mono_vo_dataset import *
 from .tum_rgbd_dataset import *
 from .nuscenes_dataset import *
+from .nuscenes_dataset3 import *
 
 
 class KittiOdometryDataloader(BaseDataLoader):
@@ -52,4 +53,10 @@ class NuscenesDataloader(BaseDataLoader):
 
     def __init__(self, batch_size=1, shuffle=True, validation_split=0.0, num_workers=4, **kwargs):
         self.dataset = NuscenesDataset(**kwargs)
+        super().__init__(self.dataset, batch_size, shuffle, validation_split, num_workers)
+
+class NuscenesDataloader3(BaseDataLoader):
+
+    def __init__(self, batch_size=1, shuffle=True, validation_split=0.0, num_workers=4, **kwargs):
+        self.dataset = NuscenesDataset3(**kwargs)
         super().__init__(self.dataset, batch_size, shuffle, validation_split, num_workers)

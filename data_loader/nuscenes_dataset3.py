@@ -40,7 +40,7 @@ def map_fn(batch, fn):
         return fn(batch)
 
 
-class NuscenesDataset(Dataset):
+class NuscenesDataset3(Dataset):
 
     def __init__(self, version: str = 'v1.0-mini',dataset_dir: str = '../../data/nuscenes-mini/v1.0-mini', 
                 pointsensor_channel: str = 'LIDAR_TOP', camera_channel: str = 'CAM_FRONT',
@@ -374,88 +374,6 @@ class NuscenesDataset(Dataset):
 
         return depth_map
 
-    # def get_pose_mat(self, frame_pose_data):
-    #     '''
-    #     frame_pose_data: Quaternions
-    #     e.g. - 
-    #         {'token': 'ddbc1befa70f4b49a0824f63a920676b',
-    #         'timestamp': 1532402930112460,
-    #         'rotation': [0.5859061687572851,
-    #         0.00046748170180213036,
-    #         0.01238901832158085,
-    #         -0.8102840582771244],
-    #         'translation': [404.3748127067429, 1161.3378286421344, 0.0]}
-    #     return:
-    #         tensor - 4*4 matrix [R|t] - [R3 t3; 0 0 0 1]
-    #     '''
-    #     pose = torch.zeros(4,4)
-    #     rotation = frame_pose_data["rotation"]
-    #     w,x,y,z = rotation
-    #     translation = frame_pose_data["translation"]
-
-    #     # R
-    #     pose[0,0] = 1 - 2*(y**2) - 2*(z**2)
-    #     pose[0,1] = 2*x*y + 2*w*z
-    #     pose[0,2] = 2*x*z - 2*w*y
-    #     pose[1,0] = 2*x*y - 2*w*z
-    #     pose[1,1] = 1 - 2*(x**2) - 2*(z**2)
-    #     pose[1,2] = 2*y*z + 2*w*x
-    #     pose[2,0] = 2*x*z + 2*w*y
-    #     pose[2,1] = 2*y*z - 2*w*x
-    #     pose[2,2] = 1 - 2*(x**2) - 2*(y**2)
-
-    #     # t
-    #     pose[0,3] = translation[0]
-    #     pose[1,3] = translation[1]
-    #     pose[2,3] = translation[2]
-
-    #     pose[3,3] = 1
-
-    #     return pose
-
-    def get_ego_pose(self, frame_pose_data):
-        '''
-        frame_pose_data: Quaternions
-        e.g. - 
-            {'token': 'ddbc1befa70f4b49a0824f63a920676b',
-            'timestamp': 1532402930112460,
-            'rotation': [0.5859061687572851,
-            0.00046748170180213036,
-            0.01238901832158085,
-            -0.8102840582771244],
-            'translation': [404.3748127067429, 1161.3378286421344, 0.0]}
-        return:
-            tensor - 4*4 matrix [R|t] - [R3 t3; 0 0 0 1]
-        '''
-        pose = torch.zeros(4,4)
-        rotation = frame_pose_data["rotation"]
-        w,x,y,z = rotation
-        translation = frame_pose_data["translation"]
-
-        # 获取rotation matrix from quaternion
-        r_mat = Quaternion(rotation).rotation_matrix  
-
-        # R
-        # pose[0,0] = 1 - 2*(y**2) - 2*(z**2)
-        # pose[0,1] = 2*x*y + 2*w*z
-        # pose[0,2] = 2*x*z - 2*w*y
-        # pose[1,0] = 2*x*y - 2*w*z
-        # pose[1,1] = 1 - 2*(x**2) - 2*(z**2)
-        # pose[1,2] = 2*y*z + 2*w*x
-        # pose[2,0] = 2*x*z + 2*w*y
-        # pose[2,1] = 2*y*z - 2*w*x
-        # pose[2,2] = 1 - 2*(x**2) - 2*(y**2)
-        pose[:3,:3] = torch.tensor(r_mat)
-
-        # t
-        pose[0,3] = translation[0]
-        pose[1,3] = translation[1]
-        pose[2,3] = translation[2]
-
-        pose[3,3] = 1
-
-        return pose
-
     def __getitem__(self, index: int):
         # 1. 获取key frame的正确sample
         key_sample = self.get_key_sample(self.nusc,index,self._offset)
@@ -492,7 +410,7 @@ class NuscenesDataset(Dataset):
         '''
         key_calib_data = self.nusc.get('calibrated_sensor', key_camData['calibrated_sensor_token'])
         key_intrinsic_K = np.array(key_calib_data["camera_intrinsic"])   # 3*3 K
-        
+        # 900*1600 -》 256，512
         ## 3. 根据target size，预处理原图，K，depth map
         ### 3.1 获取K新系数，crop box
         orig_size = tuple((key_camData["height"],key_camData["width"]))   # (900,1600)
@@ -509,50 +427,43 @@ class NuscenesDataset(Dataset):
         keyframe_depth = self.get_depth_map(new_pts,new_depth,self.target_image_size)  # 获取inv depth map from new_pts
 
         # 4. 获取keyframe的pose mat
-        ## 4.1 获取keyframe的 world2car: ego R｜T
+        ## 4.1 获取ego的extrinsic
         key_ego_pose_token = key_camData["ego_pose_token"]   # ego的extrinsic
         keyframe_ego_pose_data = self.nusc.get("ego_pose", key_ego_pose_token)  # ego pose metadata
-        keyframe_world2car_pose = self.get_ego_pose(keyframe_ego_pose_data)  # ego pose
-        ## 4.2 获取keyframe的 car2cam: extrinsic mat
-        keyframe_car2cam_pose = self.get_ego_pose(key_calib_data)
+        car_from_global = transform_matrix(keyframe_ego_pose_data['translation'], Quaternion(keyframe_ego_pose_data['rotation']),   # [R|t] world -> car
+                                           inverse=True)
+        ## 4.2 获取cam的extrinsic
+        ref_from_car = transform_matrix(key_calib_data['translation'], Quaternion(key_calib_data['rotation']), inverse=True)  # [R|t] car -> cam 
+
         ## 4.3 获取final keyframe pose
-        keyframe_pose = keyframe_world2car_pose @ keyframe_car2cam_pose   # ego @ calib
-
-        # # Homogeneous transform from ego car frame to reference frame.
-        # ref_from_car = transform_matrix(key_calib_data['translation'], Quaternion(key_calib_data['rotation']), inverse=True)  # [R|t] car -> cam 
-
-        # # Homogeneous transformation matrix from global to _current_ ego car frame.
-        # car_from_global = transform_matrix(keyframe_ego_pose_data['translation'], Quaternion(keyframe_ego_pose_data['rotation']),   # [R|t] world -> car
-        #                                    inverse=True)
-        # a = torch.from_numpy(car_from_global@ref_from_car).type(torch.float32)
+        keyframe_pose = torch.from_numpy(ref_from_car@car_from_global).type(torch.float32)
+        keyframe_pose = torch.inverse(keyframe_pose)  # cam -> global [R|T].   
+        # keyframe_pose = torch.from_numpy(car_from_global@ref_from_car).type(torch.float32)  # 错误的，抱着试试的心态
+        # keyframe_pose = torch.from_numpy(car_from_global).type(torch.float32)
 
         # 5.获取src的数据
         ### 5.0 准备工作
-        src_samples = []  # 按照顺序的src samples
+        src_samples_data = []  # 按照顺序的src samples
         frames = []
         poses = []
         intrinsics = []
 
-        # b=[]
-
         # 向前向后取出sample
         ## 向前
-        prev_sample = key_sample
+        prev_camData = key_camData
         for i in range(self.frame_count//2):
             for j in range(self.dilation):
-                prev_sample = self.nusc.get("sample",prev_sample["prev"])
-            src_samples.insert(0,prev_sample)  # 插在头部
+                prev_camData = self.nusc.get("sample_data",prev_camData["prev"])
+            src_samples_data.insert(0,prev_camData)  # 插在头部
         ## 向后
-        next_sample = key_sample
+        next_camData = key_camData
         for i in range(self.frame_count//2):
             for j in range(self.dilation):
-                next_sample = self.nusc.get("sample",next_sample["next"])
-            src_samples.append(next_sample)  # 插在尾部
+                next_camData = self.nusc.get("sample_data",next_camData["next"])
+            src_samples_data.append(next_camData)  # 插在尾部
         ### 5.1 获取src的frames
-        for src_sample in src_samples:
+        for src_camData in src_samples_data:
             # 5.1 获取src的frames
-            src_camtoken = src_sample['data'][self.camera_channel]
-            src_camData = self.nusc.get("sample_data",src_camtoken)
             srcimg_filename = src_camData["filename"]
             srcimg_path = osp.join(self.nusc.dataroot,srcimg_filename)
             srcimg = Image.open(srcimg_path)
@@ -563,24 +474,21 @@ class NuscenesDataset(Dataset):
             intrinsics.append(key_K)
 
             # 5.3 加入poses
+            src_calib_data = self.nusc.get('calibrated_sensor', src_camData['calibrated_sensor_token'])
             src_ego_pose_token = src_camData["ego_pose_token"]
             srcframe_ego_pose_data = self.nusc.get("ego_pose", src_ego_pose_token)
-            srcframe_world2car_pose = self.get_ego_pose(srcframe_ego_pose_data)
-            srcframe_car2cam_pose = keyframe_car2cam_pose   # 这个对于key和src的是一样的
-            # srcframe_pose = srcframe_car2cam_pose @  srcframe_world2car_pose
-            srcframe_pose = srcframe_world2car_pose @ srcframe_car2cam_pose
+            ## 5.3.1 获取ego的extrinsic
+            src_car_from_global = transform_matrix(srcframe_ego_pose_data['translation'], Quaternion(srcframe_ego_pose_data['rotation']),   # [R|t] world -> car
+                                            inverse=True)
+            ## 5.3.2 获取cam的extinsic
+            src_ref_from_car = transform_matrix(src_calib_data['translation'], Quaternion(src_calib_data['rotation']), inverse=True)  # [R|t] car -> cam 
+            ## 5.3.3 拼接到一起
+            srcframe_pose = torch.from_numpy(src_ref_from_car@src_car_from_global).type(torch.float32)
+            # srcframe_pose = torch.from_numpy(src_car_from_global@src_ref_from_car).type(torch.float32)
+            # srcframe_pose = torch.from_numpy(src_car_from_global).type(torch.float32)
+            srcframe_pose = torch.inverse(srcframe_pose)
+            
             poses.append(srcframe_pose)
-
-            # # Homogeneous transform from ego car frame to reference frame.
-            # src_ref_from_car = transform_matrix(key_calib_data['translation'], Quaternion(key_calib_data['rotation']), inverse=True)  # [R|t] car -> cam 
-
-            # # Homogeneous transformation matrix from global to _current_ ego car frame.
-            # src_car_from_global = transform_matrix(srcframe_ego_pose_data['translation'], Quaternion(srcframe_ego_pose_data['rotation']),   # [R|t] world -> car
-            #                                 inverse=True)
-            # s = src_car_from_global@src_ref_from_car
-            # b.append(torch.from_numpy(s).type(torch.float32))
-
-
 
         data = {
             "keyframe": keyimg_tensor,

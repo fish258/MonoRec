@@ -10,6 +10,8 @@ sys.path.append("..")
 
 from data_loader.kitti_odometry_dataset import KittiOdometryDataset
 from data_loader.nuscenes_dataset import NuscenesDataset
+from data_loader.nuscenes_dataset2 import NuscenesDataset2
+from data_loader.nuscenes_dataset3 import NuscenesDataset3
 from model.monorec.monorec_model import MonoRecModel
 from utils import unsqueezer, map_fn, to
 from matplotlib import cm
@@ -19,11 +21,13 @@ target_image_size = (256, 512) # 测试图片大小; 原始大小为(370,1226)
 
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
-dataset = NuscenesDataset()
+# dataset = NuscenesDataset()
+# dataset = NuscenesDataset2()
+dataset = NuscenesDataset3()
 # dataset = KittiOdometryDataset("data/kitti", sequences=["07"], target_image_size=target_image_size, frame_count=2,
 #                                depth_folder="image_depth_annotated", lidar_depth=True, use_dso_poses=True,
 #                                use_index_mask=None)
-# # Next three lines are a hack required because Kitti files are incomplete
+# Next three lines are a hack required because Kitti files are incomplete
 # dataset._dataset_sizes = [1000]
 # dataset._datasets[0].cam2_files = [f"data/kitti/sequences/07/image_2/{i:06d}.png" for i in range(dataset._dataset_sizes[0])] # 'data/kitti/sequences/07/image_2/0~999.png'
 # dataset._datasets[0].cam3_files = [f"data/kitti/sequences/07/image_3/{i:06d}.png" for i in range(dataset._dataset_sizes[0])]
@@ -42,7 +46,7 @@ monorec_model.to(device)
 monorec_model.eval()
 
 print("Fetching data...")
-index = 88
+index = 0
 # Corresponds to image index 169
 
 batch, depth = dataset.__getitem__(index)  # batch - dict; depth - tensor(1,W=256,H=512)

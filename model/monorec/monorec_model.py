@@ -8,7 +8,7 @@ import torchvision
 from torch import nn
 
 from model.layers import point_projection, PadSameConv2d, ConvReLU2, ConvReLU, Upconv, Refine, SSIM, Backprojection
-from utils import conditional_flip, filter_state_dict
+from utils import conditional_flip, filter_state_dict, point_projection_modified
 
 from utils import parse_config
 
@@ -191,29 +191,33 @@ class CostVolumeModule(nn.Module):
         single_frame_cvs = [[] for i in range(len(frames))]
 
         for batch_nr in range(batch_size):   # for i in range(B)，一组consecutive images做
-            batch_depths = depths[batch_nr, :, :, :]
+            batch_depths = depths[batch_nr, :, :, :]   # [32,256,512]
 
-            depth_value_count = batch_depths.shape[0]  # M个depth plane
+            depth_value_count = batch_depths.shape[0]  # M个depth plane - 32
 
             inv_k = torch.inverse(keyframe_intrinsics[batch_nr]).unsqueeze(0)  # K^-1
-            cam_points = (inv_k[:, :3, :3] @ backproject_depth.coord)
-            cam_points = batch_depths.view(depth_value_count, 1, -1) * cam_points
-            cam_points = torch.cat([cam_points, backproject_depth.ones.expand(depth_value_count, -1, -1)], 1)
+            # 1.先把ref每个点都从img coor拉回cam coor: depth=1
+            cam_points = (inv_k[:, :3, :3] @ backproject_depth.coord)   # K^-1 @ [x,y,1](即每个point ) -> [1,3,256*512] ref: u，v
+            # 2. 把每个点按照射线投影到depth=400~3的fronto plane
+            cam_points = batch_depths.view(depth_value_count, 1, -1) * cam_points   # [32,1,256*512](d) * [1,3,256*512] -> [32,3,131072] 确认uv是否不变
+            # 3.把这些在cam coor的3D点变成齐次坐标，方便投影出去
+            ## 比如第一个点: [-257,-139,400] [-49,-26,76] 单位为meters
+            cam_points = torch.cat([cam_points, backproject_depth.ones.expand(depth_value_count, -1, -1)], 1)   # 多加了一个维度变成[x,y,d,1](cam coor的) - [32,4,256*512]
 
             warped_images = []  # src images warp到 ref images的投影图像
             warped_masks = []   # 记录valid区域
 
             for i, image in enumerate(frames):
                 # 遍历frames
-                t = extrinsics[i][batch_nr] @ keyframe_pose[batch_nr]
-                pix_coords = point_projection(cam_points, depth_value_count, height, width, intrinsics[i][batch_nr].unsqueeze(0), t.unsqueeze(0)).clamp(-2, 2)
+                t = extrinsics[i][batch_nr] @ keyframe_pose[batch_nr]   # src_R @ ref_R-1
+                pix_coords = point_projection_modified(cam_points, depth_value_count, height, width, intrinsics[i][batch_nr].unsqueeze(0), t.unsqueeze(0)).clamp(-2, 2)
 
                 # (D, C, H, W)
                 image_to_warp = image[batch_nr, :, :, :].unsqueeze(0).expand(depth_value_count, -1, -1, -1)
                 mask_to_warp = self.create_mask(1, height, width, self.border_radius, keyframe.device).expand(
                     depth_value_count, -1, -1, -1)
 
-                warped_image = F.grid_sample(image_to_warp, pix_coords)
+                warped_image = F.grid_sample(image_to_warp, pix_coords)   # [32,3,256,512]
                 warped_images.append(warped_image)
 
                 warped_mask = F.grid_sample(mask_to_warp, pix_coords)
