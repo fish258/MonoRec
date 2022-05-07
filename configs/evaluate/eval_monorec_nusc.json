@@ -22,7 +22,7 @@
       }
     ],
     "data_loader": {
-      "type": "NuscenesDataloader3",
+      "type": "NuscenesDataloader",
       "args": {
         "version": "v1.0-mini",
         "dataset_dir": "../data/nuscenes-mini/v1.0-mini",

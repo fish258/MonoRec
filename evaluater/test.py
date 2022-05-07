@@ -86,3 +86,26 @@ for i in range(1,6):
     plt.imsave(f"img{i*5}next.png",img.numpy()+0.5)
 img = torch.permute(next[31,:,:,:],[1,2,0])
 plt.imsave(f"img32next.png",img.numpy()+0.5)
+
+
+# example过程，查看CV的plane的
+import matplotlib.pyplot as plt
+import torch
+
+kf = torch.permute(keyframe.squeeze(),[1,2,0]).cpu()
+plt.imsave("kf.png",kf.numpy()+0.5)
+
+prev = warped_images[:,0,:,:,:].cpu()
+next = warped_images[:,1,:,:,:].cpu()
+
+for i in range(1,6):
+    img = torch.permute(prev[i*5,:,:,:],[1,2,0])
+    plt.imsave(f"img{i*5}prev.png",img.numpy()+0.5)
+img = torch.permute(prev[31,:,:,:],[1,2,0])
+plt.imsave(f"img32prev.png",img.numpy()+0.5)
+
+for i in range(1,6):
+    img = torch.permute(next[i*5,:,:,:],[1,2,0])
+    plt.imsave(f"img{i*5}next.png",img.numpy()+0.5)
+img = torch.permute(next[31,:,:,:],[1,2,0])
+plt.imsave(f"img32next.png",img.numpy()+0.5)
